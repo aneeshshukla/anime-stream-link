@@ -9,7 +9,8 @@ const STREAM_URL = process.env.STREAM_URL;
 
 // Custom ID Remapping (Anilist ID -> HiAnime ID)
 const CUSTOM_REMAPS = {
-    '172463': 'jujutsu-kaisen-the-culling-game-part-1-20401'
+    '172463': 'jujutsu-kaisen-the-culling-game-part-1-20401',
+    '131573': 'jujutsu-kaisen-0-movie-17763'
 };
 
 // Utility to clean base URLs (remove trailing slash)
@@ -118,3 +119,4 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
+
