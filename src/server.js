@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { ProxyAgent } = require('undici');
 require('dotenv').config();
 
 const app = express();
@@ -18,19 +19,83 @@ const cleanBaseUrl = (url) => url ? url.trim().replace(/\/+$/, '') : '';
 const mapperUrl = cleanBaseUrl(HIANIME_MAPPER);
 const streamApiUrl = cleanBaseUrl(STREAM_URL);
 
+// ─── Proxy Management ───
+let proxyList = [];
+let currentProxyIndex = 0;
+
+async function fetchProxies() {
+    try {
+        console.log('[Proxy] Fetching new proxy list...');
+        const response = await fetch('https://api.proxyscrape.com/v4/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all&skip=0&limit=2000');
+        const text = await response.text();
+        const proxies = text.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+        if (proxies.length > 0) {
+            proxyList = proxies;
+            currentProxyIndex = 0;
+            console.log(`[Proxy] Successfully fetched ${proxies.length} proxies.`);
+        }
+    } catch (error) {
+        console.error('[Proxy] Failed to fetch proxies:', error);
+    }
+}
+
+fetchProxies();
+setInterval(fetchProxies, 10 * 60 * 1000);
+
+function getProxyAgent() {
+    if (proxyList.length === 0) return null;
+    const proxy = proxyList[currentProxyIndex];
+    currentProxyIndex = (currentProxyIndex + 1) % proxyList.length;
+    return new ProxyAgent(`http://${proxy}`);
+}
+
+async function fetchWithProxy(url, options = {}, retries = 5) {
+    let lastError;
+    
+    // Default 10 second timeout for proxy requests to avoid hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const fetchOptions = { ...options, signal: options.signal || controller.signal };
+
+    for (let i = 0; i < retries; i++) {
+        const agent = getProxyAgent();
+        if (agent) {
+            fetchOptions.dispatcher = agent;
+        }
+        
+        try {
+            const res = await fetch(url, fetchOptions);
+            clearTimeout(timeoutId);
+
+            // If we hit a rate limit, retry with the next proxy
+            if (res.status === 429) {
+                console.warn(`[Proxy] Rate limited! Retrying... (${i + 1}/${retries})`);
+                continue; 
+            }
+            return res; 
+        } catch (error) {
+            lastError = error;
+            console.warn(`[Proxy] Fetch failed (Attempt ${i + 1}/${retries}): ${error.message}`);
+        }
+    }
+    
+    clearTimeout(timeoutId);
+    throw lastError || new Error("Failed to fetch after multiple proxy retries");
+}
+
 // ─── Shared helper: fetch episode list for an anime ───
 async function fetchEpisodesList(animeId) {
     try {
         if (CUSTOM_REMAPS[animeId]) {
             const fetchUrl = `${streamApiUrl}/episodes/${CUSTOM_REMAPS[animeId]}`;
             console.log(`[fetchEpisodesList] Remapped fetch: ${fetchUrl}`);
-            const res = await fetch(fetchUrl);
+            const res = await fetchWithProxy(fetchUrl);
             const data = await res.json();
             return data.data || [];
         } else {
             const fetchUrl = `${mapperUrl}/anime/info/${animeId}`;
             console.log(`[fetchEpisodesList] Standard fetch: ${fetchUrl}`);
-            const res = await fetch(fetchUrl);
+            const res = await fetchWithProxy(fetchUrl);
             const data = await res.json();
             return data.data?.episodesList || [];
         }
@@ -61,7 +126,7 @@ function buildStreamLink(hianimeEpisodeId, serverId = 'hd-1', type = 'sub') {
 // ─── Fetch stream servers for a given episode ───
 async function fetchStreamServers(hianimeEpisodeId) {
     try {
-        const res = await fetch(`${streamApiUrl}/servers?id=${hianimeEpisodeId}`);
+        const res = await fetchWithProxy(`${streamApiUrl}/servers?id=${hianimeEpisodeId}`);
         return await res.json();
     } catch (error) {
         console.error("[fetchStreamServers] Error:", error);
@@ -198,13 +263,13 @@ app.get('/home', async (req, res) => {
     const spotlightResults = await Promise.allSettled(
         fixedSpotlightIds.map(async (anilistId) => {
             const [anilistRes, aniZipRes] = await Promise.all([
-                fetch('https://graphql.anilist.co', {
+                fetchWithProxy('https://graphql.anilist.co', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                     body: JSON.stringify({ query, variables: { id: anilistId } }),
                 }).then(r => r.json()),
 
-                fetch(`https://api.ani.zip/mappings?anilist_id=${anilistId}`)
+                fetchWithProxy(`https://api.ani.zip/mappings?anilist_id=${anilistId}`)
                     .then(r => r.json())
                     .catch(() => null),
             ]);
@@ -427,7 +492,7 @@ app.get('/anime/:id', async (req, res) => {
     try {
         // Fire all three requests in parallel
         const [anilistResponse, episodesList, aniZipResponse] = await Promise.all([
-            fetch('https://graphql.anilist.co', {
+            fetchWithProxy('https://graphql.anilist.co', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ query, variables: { id: parseInt(id) } }),
@@ -435,7 +500,7 @@ app.get('/anime/:id', async (req, res) => {
 
             fetchEpisodesList(id),
 
-            fetch(`https://api.ani.zip/mappings?anilist_id=${id}`)
+            fetchWithProxy(`https://api.ani.zip/mappings?anilist_id=${id}`)
                 .then(r => r.json())
                 .catch(() => null),
         ]);
@@ -566,7 +631,7 @@ app.get('/search/:query', async (req, res) => {
     `;
 
     try {
-        const response = await fetch('https://graphql.anilist.co', {
+        const response = await fetchWithProxy('https://graphql.anilist.co', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
