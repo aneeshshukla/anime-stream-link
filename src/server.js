@@ -528,6 +528,87 @@ app.get('/anime/:id', async (req, res) => {
     }
 });
 
+// ─── Search endpoint ───
+app.get('/search/:query', async (req, res) => {
+    const { query: searchQuery } = req.params;
+    const { page = 1, perPage = 20 } = req.query;
+
+    const graphqlQuery = `
+    query ($search: String, $page: Int, $perPage: Int) {
+        Page(page: $page, perPage: $perPage) {
+            pageInfo {
+                total
+                currentPage
+                lastPage
+                hasNextPage
+                perPage
+            }
+            media(search: $search, type: ANIME, sort: [POPULARITY_DESC, SCORE_DESC]) {
+                id
+                title {
+                    romaji
+                    english
+                    native
+                }
+                coverImage {
+                    extraLarge
+                    color
+                }
+                format
+                status
+                episodes
+                averageScore
+                season
+                seasonYear
+            }
+        }
+    }
+    `;
+
+    try {
+        const response = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                query: graphqlQuery, 
+                variables: { 
+                    search: searchQuery, 
+                    page: parseInt(page), 
+                    perPage: parseInt(perPage) 
+                } 
+            }),
+        });
+        
+        const data = await response.json();
+
+        if (data.errors) {
+            return res.status(400).json({ success: false, errors: data.errors });
+        }
+
+        const mediaList = data.data.Page.media.map(media => ({
+            id: media.id,
+            title: media.title.english || media.title.romaji || "",
+            poster: media.coverImage?.extraLarge || "",
+            format: media.format || "TV",
+            status: formatStatus(media.status),
+            episodes: media.episodes,
+            averageScore: media.averageScore,
+            season: media.season,
+            seasonYear: media.seasonYear,
+            color: media.coverImage?.color || ""
+        }));
+
+        res.json({
+            success: true,
+            pageInfo: data.data.Page.pageInfo,
+            results: mediaList
+        });
+    } catch (err) {
+        console.error(`[/search/${searchQuery}] Error:`, err);
+        res.status(500).json({ success: false, error: 'Failed to search anime' });
+    }
+});
+
 // Example Resource Route
 app.get('/api/resource', (req, res) => {
     res.json({ data: [{ id: 1, name: 'Sample Item' }] });
