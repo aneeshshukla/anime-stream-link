@@ -426,20 +426,25 @@ app.get('/anime/:id', async (req, res) => {
 
     try {
         // Fire all three requests in parallel
-        const [anilistResponse, episodesList] = await Promise.all([
+        const [anilistResponse, episodesList, aniZipResponse] = await Promise.all([
             fetch('https://graphql.anilist.co', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ query, variables: { id: parseInt(id) } }),
             }).then(r => r.json()),
 
-            fetchEpisodesList(id)
+            fetchEpisodesList(id),
+
+            fetch(`https://api.ani.zip/mappings?anilist_id=${id}`)
+                .then(r => r.json())
+                .catch(() => null),
         ]);
 
         const media = anilistResponse?.data?.Media;
         if (!media) {
             return res.status(404).json({ success: false, error: 'Anime not found' });
         }
+        const { banner: aniZipBanner, logo: aniZipLogo } = extractAniZipImages(aniZipResponse);
         const { timeLeft, episodeCount } = formatAiringInfo(media);
 
         // Build recommendations array
@@ -486,8 +491,9 @@ app.get('/anime/:id', async (req, res) => {
                 titleRomaji: media.title.romaji || "",
                 titleNative: media.title.native || "",
                 poster: media.coverImage?.extraLarge || "",
+                logo: aniZipLogo || "",
                 color: media.coverImage?.color || "",
-                banner: media.bannerImage || media.coverImage?.extraLarge || "",
+                banner: aniZipBanner || media.bannerImage || media.coverImage?.extraLarge || "",
                 description: media.description?.replace(/<[^>]*>?/gm, "") || "",
                 season: (media.season && media.seasonYear)
                     ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}`
