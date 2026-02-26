@@ -129,77 +129,99 @@ app.get('/api/episodes/:animeId', async (req, res) => {
     res.json({success: true, episodesList})
 })
 
-app.get('/home', (req, res) => {
+app.get('/home', async (req, res) => {
     // Returning sample mock data as requested
-    res.json({
-        "spotlight": [
-            {
-            title: "Hell’s Paradise Season 2",
-            logo: "https://artworks.thetvdb.com/banners/v4/series/402474/clearlogo/6957f8d4d5732.png",
-            banner: "https://artworks.thetvdb.com/banners/v4/series/402474/backgrounds/697685e7487aa.jpg",
-            description: "The second season of Jigokuraku.",
-            season: "Winter 2026",
-            episode: "8",
-            timeLeft: "4d 20h",
-            status: "Releasing",
-            type: "TV"
-        },
-        {
-            title: "Frieren: Beyond Journey’s End Season 2",
-            logo: "https://artworks.thetvdb.com/banners/v4/series/424536/clearlogo/65d798fbd2f61.png",
-            banner: "https://artworks.thetvdb.com/banners/v4/series/424536/backgrounds/64e6c54bb62c9.jpg",
-            description: "The second season of Frieren: Beyond Journey’s End.",
-            season: "Winter 2026",
-            episode: "12",
-            timeLeft: "2d 4h",
-            status: "Releasing",
-            type: "TV"
-        },
-        {
-            title: "There was a Cute Girl in the Hero’s Party, so I Tried Confessing to Her",
-            logo: "https://artworks.thetvdb.com/banners/v4/series/465505/clearlogo/695d3b9c51907.png",
-            banner: "https://artworks.thetvdb.com/banners/v4/series/465505/backgrounds/695d278968c35.jpg",
-            description: "Reincarnated as a mid-tier demon, Youki had one job: Crush the hero’s party. Then he saw the party’s priestess, Cecilia, and fell for her hard. Now this lovestruck demon vows to confess his feelings, even if it means betraying the Demon King. Will love bloom between these two sworn enemies?",
-            season: "Winter 2026",
-            episode: "8",
-            timeLeft: "6d 9h",
-            status: "Releasing",
-            type: "TV"
-        },
-        {
-            title: "ONE PIECE",
-            logo: "https://artworks.thetvdb.com/banners/v4/series/81797/clearlogo/611b6189d88b6.png",
-            banner: "https://artworks.thetvdb.com/banners/v4/series/81797/backgrounds/616009a8bd688.jpg",
-            description: "Gold Roger was known as the Pirate King, the strongest and most infamous being to have sailed the Grand Line. The capture and death of Roger by the World Government brought a change throughout the world. His last words before his death revealed the location of the greatest treasure in the world, One Piece. It was this revelation that brought about the Grand Age of Pirates, men who dreamed of finding One Piece (which promises an unlimited amount of riches and fame), and quite possibly the most coveted of titles for the person who found it, the title of the Pirate King.",
-            season: "Winter 2026",
-            episode: "1155",
-            timeLeft: "39d 20h",
-            status: "Releasing",
-            type: "TV"
-        },
-        {
-            title: "Jujutsu Kaisen: The Culling Game Part 1",
-            logo: "https://artworks.thetvdb.com/banners/v4/series/377543/clearlogo/611c681d42ac0.png",
-            banner: "/custom-posters/Jujutsu-Kaisen-The-Culling-Game-Part-1-Itadori-and-the-red-moon.jpg",
-            description: "The third season of Jujutsu Kaisen. After the Shibuya Incident, a deadly jujutsu battle known as the Culling Game orchestrated by Noritoshi Kamo erupts across ten colonies in Japan.",
-            season: "Winter 2026",
-            episode: "8",
-            timeLeft: "1d 20h",
-            status: "Releasing",
-            type: "TV"
-        },
-        {
-            title: "I Want to Eat Your Pancreas",
-            logo: "https://image.tmdb.org/t/p/original/iOGhQzUidBzOj6pxKp7pBZkw2ta.png",
-            banner: "https://artworks.thetvdb.com/banners/movies/16877/backgrounds/16877.jpg",
-            description: "Spring time in April and the last of the cherry blossoms are still in bloom. The usually aloof bookworm with no interest in others comes across a book in a hospital waiting room. Handwritten on the cover are the words: 'Living with Dying'. He soon discovers that it is a diary kept by his very popular and genuinely cheerful classmate, Sakura Yamauchi, who reveals to him that she is secretly suffering from a pancreatic illness and only has a limited time left. It is at this moment that she gains just one more person to share her secret.",
-            season: "Summer 2018",
-            type: "Movie",
-            episode: "NA",
-            status: "Completed"
-            // timeLeft: "2d 4h"
+    const fixedSpotlightIds = [166613, 182255, 21, 195515, 99750, 172463];
+    let responseData = [];
+
+    const query = `
+        query ($id: Int) {
+            Media(id: $id, type: ANIME) {
+                id
+                title {
+                    english
+                    romaji
+                }
+                bannerImage
+                coverImage {
+                    extraLarge
+                }
+                description
+                season
+                seasonYear
+                episodes
+                status
+                format
+                nextAiringEpisode {
+                    timeUntilAiring
+                    episode
+                }
+            }
         }
-    ],
+    `;
+
+    for (let i = 0; i < fixedSpotlightIds.length; i++) {
+        try {
+            const response = await fetch('https://graphql.anilist.co', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    query: query,
+                    variables: { id: fixedSpotlightIds[i] }
+                })
+            });
+
+            const theTvDbResponse = await fetch(`https://api.ani.zip/mappings?anilist_id=${fixedSpotlightIds[i]}`);
+            const theTvDbJson = await theTvDbResponse.json();
+            const theTvDbImages = theTvDbJson?.images || [];
+            let theTvDbBanner = "";
+            let theTvDbLogo = "";
+            for (let j = 0; j < theTvDbImages.length; j++) {
+                if (theTvDbImages[j].coverType === 'Fanart' && !theTvDbBanner) {
+                    theTvDbBanner = theTvDbImages[j].url;
+                } else if (theTvDbImages[j].coverType === 'Clearlogo' && !theTvDbLogo) {
+                    theTvDbLogo = theTvDbImages[j].url;
+                }
+                if (theTvDbBanner && theTvDbLogo) break;
+            }
+            
+            const data = await response.json();
+            const media = data?.data?.Media;
+            
+            if (media) {
+                let timeLeft = "";
+                let episodeCount = media.episodes?.toString() || "NA";
+                
+                if (media.nextAiringEpisode) {
+                    const seconds = media.nextAiringEpisode.timeUntilAiring;
+                    const days = Math.floor(seconds / (3600 * 24));
+                    const hours = Math.floor((seconds % (3600 * 24)) / 3600);
+                    timeLeft = `${days}d ${hours}h`;
+                    episodeCount = media.nextAiringEpisode.episode?.toString();
+                }
+
+                responseData.push({
+                    title: media.title.english || media.title.romaji || "",
+                    logo: theTvDbLogo || media.coverImage?.extraLarge || "",
+                    banner: theTvDbBanner || media.bannerImage || media.coverImage?.extraLarge || "",
+                    description: media.description?.replace(/<[^>]*>?/gm, "") || "",
+                    season: (media.season && media.seasonYear) ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}` : "Unknown",
+                    episode: episodeCount,
+                    timeLeft: timeLeft,
+                    status: media.status === 'FINISHED' ? 'Completed' : (media.status ? media.status.charAt(0) + media.status.slice(1).toLowerCase().replace(/_/g, " ") : "Unknown"),
+                    type: media.format || "TV"
+                });
+            }
+        } catch (err) {
+            console.error(`Failed to fetch AniList data for ID ${fixedSpotlightIds[i]}:`, err);
+        }
+    }
+
+    res.json({
+        "spotlight": responseData,
         "recently added": [
             {
             title: "The Case Book of Arne",
