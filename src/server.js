@@ -131,6 +131,13 @@ app.get('/api/episodes/:animeId', async (req, res) => {
 
 app.get('/home', async (req, res) => {
     // Returning sample mock data as requested
+    const customMapping = {
+        99750: {
+            logo: "https://image.tmdb.org/t/p/original/iOGhQzUidBzOj6pxKp7pBZkw2ta.png",
+            banner: "https://artworks.thetvdb.com/banners/movies/16877/backgrounds/16877.jpg"
+        }
+        
+    }
     const fixedSpotlightIds = [166613, 182255, 21, 195515, 99750, 172463];
     let responseData = [];
 
@@ -180,12 +187,21 @@ app.get('/home', async (req, res) => {
             let theTvDbBanner = "";
             let theTvDbLogo = "";
             for (let j = 0; j < theTvDbImages.length; j++) {
-                if (theTvDbImages[j].coverType === 'Fanart' && !theTvDbBanner) {
+                if (customMapping[fixedSpotlightIds[i]]) {
+                    theTvDbBanner = customMapping[fixedSpotlightIds[i]].banner;
+                    theTvDbLogo = customMapping[fixedSpotlightIds[i]].logo;
+                    break;
+                }
+                else if (theTvDbImages[j].coverType === 'Fanart' && !theTvDbBanner) {
                     theTvDbBanner = theTvDbImages[j].url;
                 } else if (theTvDbImages[j].coverType === 'Clearlogo' && !theTvDbLogo) {
                     theTvDbLogo = theTvDbImages[j].url;
                 }
                 if (theTvDbBanner && theTvDbLogo) break;
+            }
+            if (customMapping[fixedSpotlightIds[i]]) {
+                theTvDbBanner = customMapping[fixedSpotlightIds[i]].banner;
+                theTvDbLogo = customMapping[fixedSpotlightIds[i]].logo;
             }
             
             const data = await response.json();
