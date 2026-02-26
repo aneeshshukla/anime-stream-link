@@ -240,7 +240,8 @@ app.get('/home', async (req, res) => {
     res.json({
         "spotlight": responseData,
         "recently added": [
-            {
+            {   
+                id: 183984,
                 title: "The Case Book of Arne",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183984-uq5scAXrhEdx.jpg",
                 type: "TV",
@@ -248,6 +249,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 183661,
                 title: "Isekai Office Worker",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183661-3muPFi4LtHmK.jpg",
                 type: "TV",
@@ -255,6 +257,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 177679,
                 title: "The Darwin Incident",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx177679-BgsgE0fQk3qN.jpg",
                 type: "TV",
@@ -262,6 +265,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 187942,
                 title: "Tune In to the Midnight Heart",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx187942-c2cZvunJGfiE.jpg",
                 type: "TV",
@@ -269,6 +273,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 194318,
                 title: "Yoroi-Shinden Samurai Johnny",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx194318-V3STmm4wutVQ.jpg",
                 type: "TV",
@@ -276,6 +281,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 176370,
                 title: "'Tis Time for \"Torture,\" Princess Season 2",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx176370-hz2H4TUeyGgt.png",
                 type: "TV",
@@ -283,6 +289,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 185646,
                 title: "Koupen-chan",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx185646-2eGmsnaSHiLC.jpg",
                 type: "TV Short",
@@ -290,6 +297,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 189565,
                 title: "You Can't Be in a Real Harem",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx189565-OHhadYSsd0Bg.jpg",
                 type: "TV",
@@ -297,6 +305,7 @@ app.get('/home', async (req, res) => {
                 status: "Releasing"
             },
             {
+                id: 195515,
                 title: "There Was a Cute Girl in the Hero's Party",
                 poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx195515-p1nD71Hmr4ly.jpg",
                 type: "TV",
@@ -417,26 +426,20 @@ app.get('/anime/:id', async (req, res) => {
 
     try {
         // Fire all three requests in parallel
-        const [anilistResponse, episodesList, aniZipResponse] = await Promise.all([
+        const [anilistResponse, episodesList] = await Promise.all([
             fetch('https://graphql.anilist.co', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ query, variables: { id: parseInt(id) } }),
             }).then(r => r.json()),
 
-            fetchEpisodesList(id),
-
-            fetch(`https://api.ani.zip/mappings?anilist_id=${id}`)
-                .then(r => r.json())
-                .catch(() => null),
+            fetchEpisodesList(id)
         ]);
 
         const media = anilistResponse?.data?.Media;
         if (!media) {
             return res.status(404).json({ success: false, error: 'Anime not found' });
         }
-
-        const { banner: aniZipBanner, logo: aniZipLogo } = extractAniZipImages(aniZipResponse);
         const { timeLeft, episodeCount } = formatAiringInfo(media);
 
         // Build recommendations array
@@ -449,7 +452,7 @@ app.get('/anime/:id', async (req, res) => {
                     title: rec.title.english || rec.title.romaji || "",
                     poster: rec.coverImage?.extraLarge || "",
                     format: rec.format || "TV",
-                    status: rec.status,
+                    status: formatStatus(rec.status),
                     episodes: rec.episodes,
                     averageScore: rec.averageScore,
                     season: rec.season,
@@ -464,7 +467,7 @@ app.get('/anime/:id', async (req, res) => {
             title: edge.node.title.english || edge.node.title.romaji || "",
             poster: edge.node.coverImage?.extraLarge || "",
             format: edge.node.format,
-            status: edge.node.status,
+            status: formatStatus(edge.node.status),
             episodes: edge.node.episodes,
             type: edge.node.type,
         }));
@@ -484,8 +487,7 @@ app.get('/anime/:id', async (req, res) => {
                 titleNative: media.title.native || "",
                 poster: media.coverImage?.extraLarge || "",
                 color: media.coverImage?.color || "",
-                banner: aniZipBanner || media.bannerImage || media.coverImage?.extraLarge || "",
-                logo: aniZipLogo || "",
+                banner: media.bannerImage || media.coverImage?.extraLarge || "",
                 description: media.description?.replace(/<[^>]*>?/gm, "") || "",
                 season: (media.season && media.seasonYear)
                     ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}`
