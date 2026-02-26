@@ -265,21 +265,21 @@ app.get('/home', (req, res) => {
             status: "Releasing"
         }
     ],
-        "popular-anime": [
-            { id: "3", title: "Very Popular Anime", type: "TV", episodes: 100 }
-        ],
-        "popular-movies": [
-            { id: "4", title: "Popular Anime Movie", type: "Movie", episodes: 1 }
-        ],
-        "seasonal anime": [
-            { id: "5", title: "This Season's Hit", type: "TV", episodes: 12 }
-        ],
-        "anime of all time": [
-            { id: "6", title: "Legendary Anime", type: "TV", episodes: 500 }
-        ],
-        "coming soon": [
-            { id: "7", title: "Next Year's Hype", type: "TV", episodes: null }
-        ]
+    //     "popular-anime": [
+    //         { id: "3", title: "Very Popular Anime", type: "TV", episodes: 100 }
+    //     ],
+    //     "popular-movies": [
+    //         { id: "4", title: "Popular Anime Movie", type: "Movie", episodes: 1 }
+    //     ],
+    //     "seasonal anime": [
+    //         { id: "5", title: "This Season's Hit", type: "TV", episodes: 12 }
+    //     ],
+    //     "anime of all time": [
+    //         { id: "6", title: "Legendary Anime", type: "TV", episodes: 500 }
+    //     ],
+    //     "coming soon": [
+    //         { id: "7", title: "Next Year's Hype", type: "TV", episodes: null }
+    //     ]
     });
 });
 
