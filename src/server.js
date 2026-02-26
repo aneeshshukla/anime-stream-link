@@ -18,85 +18,92 @@ const cleanBaseUrl = (url) => url ? url.trim().replace(/\/+$/, '') : '';
 const mapperUrl = cleanBaseUrl(HIANIME_MAPPER);
 const streamApiUrl = cleanBaseUrl(STREAM_URL);
 
-async function getHianimeEpisodeId(animeId, epNum = '1') {
+// ─── Shared helper: fetch episode list for an anime ───
+async function fetchEpisodesList(animeId) {
     try {
-        let episodesList = [];
-        
         if (CUSTOM_REMAPS[animeId]) {
-            // Remapped: fetch from streamApiUrl/episodes/
             const fetchUrl = `${streamApiUrl}/episodes/${CUSTOM_REMAPS[animeId]}`;
-            console.log(`[getHianimeEpisodeId] Remapped fetch: ${fetchUrl}`);
+            console.log(`[fetchEpisodesList] Remapped fetch: ${fetchUrl}`);
             const res = await fetch(fetchUrl);
             const data = await res.json();
-            episodesList = data.data || [];
+            return data.data || [];
         } else {
-            // Standard: fetch from mapperUrl/anime/info/
             const fetchUrl = `${mapperUrl}/anime/info/${animeId}`;
-            console.log(`[getHianimeEpisodeId] Standard fetch: ${fetchUrl}`);
+            console.log(`[fetchEpisodesList] Standard fetch: ${fetchUrl}`);
             const res = await fetch(fetchUrl);
             const data = await res.json();
-            episodesList = data.data?.episodesList || [];
+            return data.data?.episodesList || [];
         }
-        // Search in both episodeNumber (new API) and number (old mapper)
-        const episode = episodesList.find((ep) => ep.episodeNumber == epNum || ep.number == epNum);
-        
-        if (episode && episode.id) {
-            console.log(`[getHianimeEpisodeId] Found Episode ${epNum}: ${episode.id}`);
-            return episode.id.includes("::") ? episode.id : episode.id.replace("?", "::");
-        }
-        
-        console.warn(`[getHianimeEpisodeId] Episode ${epNum} not found for ${animeId}`);
-        return null;
     } catch (error) {
-        console.error("Error fetching HiAnime ID:", error);
-        return null;
+        console.error("[fetchEpisodesList] Error:", error);
+        return [];
     }
 }
 
-async function getEpisodes(animeId) {
-    try {
-        let episodesList = [];
-        
-        if (CUSTOM_REMAPS[animeId]) {
-            // Remapped: fetch from streamApiUrl/episodes/
-            const fetchUrl = `${streamApiUrl}/episodes/${CUSTOM_REMAPS[animeId]}`;
-            console.log(`[getHianimeEpisodeId] Remapped fetch: ${fetchUrl}`);
-            const res = await fetch(fetchUrl);
-            const data = await res.json();
-            episodesList = data.data || [];
-        } else {
-            // Standard: fetch from mapperUrl/anime/info/
-            const fetchUrl = `${mapperUrl}/anime/info/${animeId}`;
-            console.log(`[getHianimeEpisodeId] Standard fetch: ${fetchUrl}`);
-            const res = await fetch(fetchUrl);
-            const data = await res.json();
-            episodesList = data.data?.episodesList || [];
-        }
-        if (episodesList) {
-        return episodesList}
-        
-        console.warn(`[getHianimeEpisodeId] Episode ${epNum} not found for ${animeId}`);
-        return null;
-    } catch (error) {
-        console.error("Error fetching HiAnime ID:", error);
-        return null;
+// ─── Find a single episode ID from the list ───
+function findEpisodeId(episodesList, epNum = '1') {
+    const episode = episodesList.find(
+        (ep) => ep.episodeNumber == epNum || ep.number == epNum
+    );
+    if (episode?.id) {
+        console.log(`[findEpisodeId] Found Episode ${epNum}: ${episode.id}`);
+        return episode.id.includes("::") ? episode.id : episode.id.replace("?", "::");
     }
-}
-
-async function getStreamLinks(animeId, epNum = '1', serverId = 'hd-1', type = 'sub') {
-    const hianimeEpisodeId = await getHianimeEpisodeId(animeId, epNum);
-    if (hianimeEpisodeId) {
-        return `${streamApiUrl}/embed/${serverId}/${hianimeEpisodeId}/${type}`;
-    }
+    console.warn(`[findEpisodeId] Episode ${epNum} not found`);
     return null;
 }
 
-async function getStreamServers(animeId, epNum = '1') {
-    const hianimeEpisodeId = await getHianimeEpisodeId(animeId, epNum);
-    if (hianimeEpisodeId) {
-        return await fetch(`${streamApiUrl}/servers?id=${hianimeEpisodeId}`).then(res => res.json());
+// ─── Build a stream embed URL ───
+function buildStreamLink(hianimeEpisodeId, serverId = 'hd-1', type = 'sub') {
+    return `${streamApiUrl}/embed/${serverId}/${hianimeEpisodeId}/${type}`;
+}
+
+// ─── Fetch stream servers for a given episode ───
+async function fetchStreamServers(hianimeEpisodeId) {
+    try {
+        const res = await fetch(`${streamApiUrl}/servers?id=${hianimeEpisodeId}`);
+        return await res.json();
+    } catch (error) {
+        console.error("[fetchStreamServers] Error:", error);
+        return null;
     }
-    return null;
+}
+
+// ─── Shared: format airing info ───
+function formatAiringInfo(media) {
+    let timeLeft = "";
+    let episodeCount = media.episodes?.toString() || "NA";
+    if (media.nextAiringEpisode) {
+        const seconds = media.nextAiringEpisode.timeUntilAiring;
+        const days = Math.floor(seconds / (3600 * 24));
+        const hours = Math.floor((seconds % (3600 * 24)) / 3600);
+        timeLeft = `${days}d ${hours}h`;
+        episodeCount = media.nextAiringEpisode.episode?.toString();
+    }
+    return { timeLeft, episodeCount };
+}
+
+// ─── Shared: format status string ───
+function formatStatus(status) {
+    if (status === 'FINISHED') return 'Completed';
+    if (!status) return 'Unknown';
+    return status.charAt(0) + status.slice(1).toLowerCase().replace(/_/g, " ");
+}
+
+// ─── Shared: extract banner & logo from ani.zip images ───
+function extractAniZipImages(aniZipData, customOverride) {
+    if (customOverride) {
+        return { banner: customOverride.banner, logo: customOverride.logo };
+    }
+    let banner = "";
+    let logo = "";
+    const images = aniZipData?.images || [];
+    for (const img of images) {
+        if (img.coverType === 'Fanart' && !banner) banner = img.url;
+        if (img.coverType === 'Clearlogo' && !logo) logo = img.url;
+        if (banner && logo) break;
+    }
+    return { banner, logo };
 }
 
 // Middleware
@@ -108,38 +115,58 @@ app.get('/', (req, res) => {
     res.json({ message: 'Welcome to the JS API Template' });
 });
 
-// New endpoint for stream links
+// ─── Stream endpoint ───
+// FIX: Previously called getHianimeEpisodeId 3 times (once per function).
+//      Now fetches the episode list ONCE, then derives everything from it.
 app.get('/api/stream/:animeId', async (req, res) => {
-    const { animeId } = req.params;
-    const { ep = '1', server = 'hd-1', type = 'sub' } = req.query;
-    
-    const streamLink = await getStreamLinks(animeId, ep, server, type);
-    const streamServers = await getStreamServers(animeId, ep);
-    const episodesList = await getEpisodes(animeId)
-    if (streamLink) {
-        res.json({ success: true,episodesList, streamLink, streamServers });
-    } else {
-        res.status(404).json({ success: false, error: 'Stream link not found' });
+    try {
+        const { animeId } = req.params;
+        const { ep = '1', server = 'hd-1', type = 'sub' } = req.query;
+
+        // Single fetch for episodes
+        const episodesList = await fetchEpisodesList(animeId);
+        const hianimeEpisodeId = findEpisodeId(episodesList, ep);
+
+        if (!hianimeEpisodeId) {
+            return res.status(404).json({ success: false, error: 'Stream link not found' });
+        }
+
+        // Build link + fetch servers in parallel
+        const [streamServers] = await Promise.all([
+            fetchStreamServers(hianimeEpisodeId),
+        ]);
+        const streamLink = buildStreamLink(hianimeEpisodeId, server, type);
+
+        res.json({ success: true, episodesList, streamLink, streamServers });
+    } catch (err) {
+        console.error(`[/api/stream] Error:`, err);
+        res.status(500).json({ success: false, error: 'Failed to fetch stream data' });
     }
 });
 
+// ─── Episodes endpoint ───
 app.get('/api/episodes/:animeId', async (req, res) => {
-    const { animeId } = req.params;
-    const episodesList = await getEpisodes(animeId);
-    res.json({success: true, episodesList})
-})
+    try {
+        const { animeId } = req.params;
+        const episodesList = await fetchEpisodesList(animeId);
+        res.json({ success: true, episodesList });
+    } catch (err) {
+        console.error(`[/api/episodes] Error:`, err);
+        res.status(500).json({ success: false, error: 'Failed to fetch episodes' });
+    }
+});
 
+// ─── Home endpoint ───
+// FIX: Previously fetched each spotlight ID sequentially in a for-loop.
+//      Now uses Promise.all to fetch all spotlight data in parallel.
 app.get('/home', async (req, res) => {
-    // Returning sample mock data as requested
     const customMapping = {
         99750: {
             logo: "https://image.tmdb.org/t/p/original/iOGhQzUidBzOj6pxKp7pBZkw2ta.png",
             banner: "https://artworks.thetvdb.com/banners/movies/16877/backgrounds/16877.jpg"
         }
-        
-    }
-    const fixedSpotlightIds = [166613, 182255, 21, 195515, 99750, 172463];
-    let responseData = [];
+    };
+    const fixedSpotlightIds = [166613, 182255, 21, 195515, 172463, 99750];
 
     const query = `
         query ($id: Int) {
@@ -167,142 +194,116 @@ app.get('/home', async (req, res) => {
         }
     `;
 
-    for (let i = 0; i < fixedSpotlightIds.length; i++) {
-        try {
-            const response = await fetch('https://graphql.anilist.co', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    query: query,
-                    variables: { id: fixedSpotlightIds[i] }
-                })
-            });
+    // Fetch all spotlight entries in parallel
+    const spotlightResults = await Promise.allSettled(
+        fixedSpotlightIds.map(async (anilistId) => {
+            const [anilistRes, aniZipRes] = await Promise.all([
+                fetch('https://graphql.anilist.co', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ query, variables: { id: anilistId } }),
+                }).then(r => r.json()),
 
-            const theTvDbResponse = await fetch(`https://api.ani.zip/mappings?anilist_id=${fixedSpotlightIds[i]}`);
-            const theTvDbJson = await theTvDbResponse.json();
-            const theTvDbImages = theTvDbJson?.images || [];
-            let theTvDbBanner = "";
-            let theTvDbLogo = "";
-            for (let j = 0; j < theTvDbImages.length; j++) {
-                if (customMapping[fixedSpotlightIds[i]]) {
-                    theTvDbBanner = customMapping[fixedSpotlightIds[i]].banner;
-                    theTvDbLogo = customMapping[fixedSpotlightIds[i]].logo;
-                    break;
-                }
-                else if (theTvDbImages[j].coverType === 'Fanart' && !theTvDbBanner) {
-                    theTvDbBanner = theTvDbImages[j].url;
-                } else if (theTvDbImages[j].coverType === 'Clearlogo' && !theTvDbLogo) {
-                    theTvDbLogo = theTvDbImages[j].url;
-                }
-                if (theTvDbBanner && theTvDbLogo) break;
-            }
-            if (customMapping[fixedSpotlightIds[i]]) {
-                theTvDbBanner = customMapping[fixedSpotlightIds[i]].banner;
-                theTvDbLogo = customMapping[fixedSpotlightIds[i]].logo;
-            }
-            
-            const data = await response.json();
-            const media = data?.data?.Media;
-            
-            if (media) {
-                let timeLeft = "";
-                let episodeCount = media.episodes?.toString() || "NA";
-                
-                if (media.nextAiringEpisode) {
-                    const seconds = media.nextAiringEpisode.timeUntilAiring;
-                    const days = Math.floor(seconds / (3600 * 24));
-                    const hours = Math.floor((seconds % (3600 * 24)) / 3600);
-                    timeLeft = `${days}d ${hours}h`;
-                    episodeCount = media.nextAiringEpisode.episode?.toString();
-                }
+                fetch(`https://api.ani.zip/mappings?anilist_id=${anilistId}`)
+                    .then(r => r.json())
+                    .catch(() => null),
+            ]);
 
-                responseData.push({
-                    title: media.title.english || media.title.romaji || "",
-                    logo: theTvDbLogo || media.coverImage?.extraLarge || "",
-                    banner: theTvDbBanner || media.bannerImage || media.coverImage?.extraLarge || "",
-                    description: media.description?.replace(/<[^>]*>?/gm, "") || "",
-                    season: (media.season && media.seasonYear) ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}` : "Unknown",
-                    episode: episodeCount,
-                    timeLeft: timeLeft,
-                    status: media.status === 'FINISHED' ? 'Completed' : (media.status ? media.status.charAt(0) + media.status.slice(1).toLowerCase().replace(/_/g, " ") : "Unknown"),
-                    type: media.format || "TV"
-                });
-            }
-        } catch (err) {
-            console.error(`Failed to fetch AniList data for ID ${fixedSpotlightIds[i]}:`, err);
-        }
-    }
+            const media = anilistRes?.data?.Media;
+            if (!media) return null;
+
+            const { banner, logo } = extractAniZipImages(aniZipRes, customMapping[anilistId]);
+            const { timeLeft, episodeCount } = formatAiringInfo(media);
+
+            return {
+                id: media.id,
+                title: media.title.english || media.title.romaji || "",
+                logo: logo || media.coverImage?.extraLarge || "",
+                banner: banner || media.bannerImage || media.coverImage?.extraLarge || "",
+                description: media.description?.replace(/<[^>]*>?/gm, "") || "",
+                season: (media.season && media.seasonYear)
+                    ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}`
+                    : "Unknown",
+                episode: episodeCount,
+                timeLeft: timeLeft,
+                status: formatStatus(media.status),
+                type: media.format || "TV"
+            };
+        })
+    );
+
+    // Collect only fulfilled, non-null results
+    const responseData = spotlightResults
+        .filter(r => r.status === 'fulfilled' && r.value !== null)
+        .map(r => r.value);
 
     res.json({
         "spotlight": responseData,
         "recently added": [
             {
-            title: "The Case Book of Arne",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183984-uq5scAXrhEdx.jpg",
-            type: "TV",
-            episodes: 12,
-            status: "Releasing"
-        },
-        {
-            title: "Isekai Office Worker",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183661-3muPFi4LtHmK.jpg",
-            type: "TV",
-            episodes: 12,
-            status: "Releasing"
-        },
-        {
-            title: "The Darwin Incident",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx177679-BgsgE0fQk3qN.jpg",
-            type: "TV",
-            episodes: 13,
-            status: "Releasing"
-        },
-        {
-            title: "Tune In to the Midnight Heart",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx187942-c2cZvunJGfiE.jpg",
-            type: "TV",
-            episodes: 12,
-            status: "Releasing"
-        },
-        {
-            title: "Yoroi-Shinden Samurai Johnny",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx194318-V3STmm4wutVQ.jpg",
-            type: "TV",
-            episodes: 12,
-            status: "Releasing"
-        },
-        {
-            title: "'Tis Time for \"Torture,\" Princess Season 2",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx176370-hz2H4TUeyGgt.png",
-            type: "TV",
-            episodes: 12,
-            status: "Releasing"
-        },
-        {
-            title: "Koupen-chan",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx185646-2eGmsnaSHiLC.jpg",
-            type: "TV Short",
-            episodes: 47,
-            status: "Releasing"
-        },
-        {
-            title: "You Can't Be in a Real Harem",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx189565-OHhadYSsd0Bg.jpg",
-            type: "TV",
-            episodes: 12,
-            status: "Releasing"
-        },
-        {
-            title: "There Was a Cute Girl in the Hero's Party",
-            poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx195515-p1nD71Hmr4ly.jpg",
-            type: "TV",
-            episodes: 12,
-            status: "Releasing"
-        }
-    ],
+                title: "The Case Book of Arne",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183984-uq5scAXrhEdx.jpg",
+                type: "TV",
+                episodes: 12,
+                status: "Releasing"
+            },
+            {
+                title: "Isekai Office Worker",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183661-3muPFi4LtHmK.jpg",
+                type: "TV",
+                episodes: 12,
+                status: "Releasing"
+            },
+            {
+                title: "The Darwin Incident",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx177679-BgsgE0fQk3qN.jpg",
+                type: "TV",
+                episodes: 13,
+                status: "Releasing"
+            },
+            {
+                title: "Tune In to the Midnight Heart",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx187942-c2cZvunJGfiE.jpg",
+                type: "TV",
+                episodes: 12,
+                status: "Releasing"
+            },
+            {
+                title: "Yoroi-Shinden Samurai Johnny",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx194318-V3STmm4wutVQ.jpg",
+                type: "TV",
+                episodes: 12,
+                status: "Releasing"
+            },
+            {
+                title: "'Tis Time for \"Torture,\" Princess Season 2",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx176370-hz2H4TUeyGgt.png",
+                type: "TV",
+                episodes: 12,
+                status: "Releasing"
+            },
+            {
+                title: "Koupen-chan",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx185646-2eGmsnaSHiLC.jpg",
+                type: "TV Short",
+                episodes: 47,
+                status: "Releasing"
+            },
+            {
+                title: "You Can't Be in a Real Harem",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx189565-OHhadYSsd0Bg.jpg",
+                type: "TV",
+                episodes: 12,
+                status: "Releasing"
+            },
+            {
+                title: "There Was a Cute Girl in the Hero's Party",
+                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx195515-p1nD71Hmr4ly.jpg",
+                type: "TV",
+                episodes: 12,
+                status: "Releasing"
+            }
+        ],
     //     "popular-anime": [
     //         { id: "3", title: "Very Popular Anime", type: "TV", episodes: 100 }
     //     ],
@@ -319,6 +320,204 @@ app.get('/home', async (req, res) => {
     //         { id: "7", title: "Next Year's Hype", type: "TV", episodes: null }
     //     ]
     });
+});
+
+// ─── Anime detail endpoint ───
+app.get('/anime/:id', async (req, res) => {
+    const { id } = req.params;
+
+    const query = `
+    query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+            id
+            title {
+                romaji
+                english
+                native
+            }
+            coverImage {
+                extraLarge
+                large
+                color
+            }
+            bannerImage
+            description
+            season
+            seasonYear
+            episodes
+            duration
+            nextAiringEpisode {
+                timeUntilAiring
+                episode
+            }
+            status
+            format
+            genres
+            averageScore
+            meanScore
+            popularity
+            favourites
+            source
+            countryOfOrigin
+            startDate { year month day }
+            endDate { year month day }
+            studios {
+                nodes {
+                    name
+                    isAnimationStudio
+                }
+            }
+            trailer {
+                id
+                site
+            }
+            synonyms
+            tags {
+                name
+                rank
+            }
+            relations {
+                edges {
+                    relationType
+                    node {
+                        id
+                        title { romaji english }
+                        coverImage { extraLarge }
+                        format
+                        status
+                        episodes
+                        type
+                    }
+                }
+            }
+            recommendations(sort: RATING_DESC, perPage: 12) {
+                nodes {
+                    mediaRecommendation {
+                        id
+                        title {
+                            romaji
+                            english
+                        }
+                        coverImage {
+                            extraLarge
+                        }
+                        bannerImage
+                        format
+                        status
+                        episodes
+                        averageScore
+                        season
+                        seasonYear
+                    }
+                }
+            }
+        }
+    }
+    `;
+
+    try {
+        // Fire all three requests in parallel
+        const [anilistResponse, episodesList, aniZipResponse] = await Promise.all([
+            fetch('https://graphql.anilist.co', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ query, variables: { id: parseInt(id) } }),
+            }).then(r => r.json()),
+
+            fetchEpisodesList(id),
+
+            fetch(`https://api.ani.zip/mappings?anilist_id=${id}`)
+                .then(r => r.json())
+                .catch(() => null),
+        ]);
+
+        const media = anilistResponse?.data?.Media;
+        if (!media) {
+            return res.status(404).json({ success: false, error: 'Anime not found' });
+        }
+
+        const { banner: aniZipBanner, logo: aniZipLogo } = extractAniZipImages(aniZipResponse);
+        const { timeLeft, episodeCount } = formatAiringInfo(media);
+
+        // Build recommendations array
+        const recommendations = (media.recommendations?.nodes || [])
+            .filter(n => n.mediaRecommendation)
+            .map(n => {
+                const rec = n.mediaRecommendation;
+                return {
+                    id: rec.id,
+                    title: rec.title.english || rec.title.romaji || "",
+                    poster: rec.coverImage?.extraLarge || "",
+                    format: rec.format || "TV",
+                    status: rec.status,
+                    episodes: rec.episodes,
+                    averageScore: rec.averageScore,
+                    season: rec.season,
+                    seasonYear: rec.seasonYear,
+                };
+            });
+
+        // Build relations array
+        const relations = (media.relations?.edges || []).map(edge => ({
+            relationType: edge.relationType,
+            id: edge.node.id,
+            title: edge.node.title.english || edge.node.title.romaji || "",
+            poster: edge.node.coverImage?.extraLarge || "",
+            format: edge.node.format,
+            status: edge.node.status,
+            episodes: edge.node.episodes,
+            type: edge.node.type,
+        }));
+
+        // Build studios array
+        const studios = (media.studios?.nodes || []).map(s => ({
+            name: s.name,
+            isAnimationStudio: s.isAnimationStudio,
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                id: media.id,
+                title: media.title.english || media.title.romaji || "",
+                titleRomaji: media.title.romaji || "",
+                titleNative: media.title.native || "",
+                poster: media.coverImage?.extraLarge || "",
+                color: media.coverImage?.color || "",
+                banner: aniZipBanner || media.bannerImage || media.coverImage?.extraLarge || "",
+                logo: aniZipLogo || "",
+                description: media.description?.replace(/<[^>]*>?/gm, "") || "",
+                season: (media.season && media.seasonYear)
+                    ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}`
+                    : "Unknown",
+                episode: episodeCount,
+                totalEpisodes: media.episodes,
+                duration: media.duration,
+                timeLeft: timeLeft,
+                status: formatStatus(media.status),
+                type: media.format || "TV",
+                genres: media.genres || [],
+                averageScore: media.averageScore,
+                meanScore: media.meanScore,
+                popularity: media.popularity,
+                favourites: media.favourites,
+                source: media.source,
+                countryOfOrigin: media.countryOfOrigin,
+                startDate: media.startDate,
+                endDate: media.endDate,
+                studios: studios,
+                trailer: media.trailer,
+                synonyms: media.synonyms || [],
+                tags: (media.tags || []).slice(0, 10).map(t => ({ name: t.name, rank: t.rank })),
+                relations: relations,
+            },
+            episodes: episodesList || [],
+            recommendations: recommendations,
+        });
+    } catch (err) {
+        console.error(`[/anime/${id}] Error:`, err);
+        res.status(500).json({ success: false, error: 'Failed to fetch anime data' });
+    }
 });
 
 // Example Resource Route
