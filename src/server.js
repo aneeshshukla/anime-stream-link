@@ -405,6 +405,12 @@ app.get('/anime/:id', async (req, res) => {
                     isAnimationStudio
                 }
             }
+            streamingEpisodes {
+                title
+                thumbnail
+                url
+                site
+            }
             trailer {
                 id
                 site
@@ -543,12 +549,26 @@ app.get('/anime/:id', async (req, res) => {
                 startDate: media.startDate,
                 endDate: media.endDate,
                 studios: studios,
+                streamingEpisodes: media.streamingEpisodes || [],
                 trailer: media.trailer,
                 synonyms: media.synonyms || [],
                 tags: (media.tags || []).slice(0, 10).map(t => ({ name: t.name, rank: t.rank })),
                 relations: relations,
             },
-            episodes: episodesList || [],
+            episodes: (episodesList || []).map(ep => {
+                const epNum = parseFloat(ep.number || ep.episodeNumber);
+                let thumbnail = "";
+                if (media.streamingEpisodes && !isNaN(epNum)) {
+                    for (const streamEp of media.streamingEpisodes) {
+                        const match = streamEp.title.match(/(?:Episode|Ep)\s*(\d+(\.\d+)?)/i);
+                        if (match && parseFloat(match[1]) === epNum) {
+                            thumbnail = streamEp.thumbnail;
+                            break;
+                        }
+                    }
+                }
+                return { ...ep, thumbnail };
+            }),
             recommendations: recommendations,
         });
     } catch (err) {
