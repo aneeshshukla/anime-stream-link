@@ -195,7 +195,7 @@ app.get('/home', async (req, res) => {
             banner: "https://artworks.thetvdb.com/banners/movies/16877/backgrounds/16877.jpg"
         }
     };
-    const fixedSpotlightIds = [166613, 182255, 21, 195515, 172463, 99750];
+    const fixedSpotlightIds = [195322, 166613, 182255, 21, 195515, 172463, 99750];
 
     const query = `
         query ($id: Int) {
