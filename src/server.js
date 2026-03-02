@@ -434,6 +434,21 @@ app.get('/anime/:id', async (req, res) => {
                     }
                 }
             }
+            characters(sort: [ROLE, RELEVANCE, ID], perPage: 25) {
+                edges {
+                    role
+                    node {
+                        id
+                        name { userPreferred }
+                        image { large }
+                    }
+                    voiceActors(language: JAPANESE, sort: [RELEVANCE, ID]) {
+                        id
+                        name { userPreferred }
+                        image { large }
+                    }
+                }
+            }
             recommendations(sort: RATING_DESC, perPage: 12) {
                 nodes {
                     mediaRecommendation {
@@ -518,6 +533,19 @@ app.get('/anime/:id', async (req, res) => {
             isAnimationStudio: s.isAnimationStudio,
         }));
 
+        // Build characters array
+        const characters = (media.characters?.edges || []).map(edge => ({
+            role: edge.role,
+            id: edge.node?.id,
+            name: edge.node?.name?.userPreferred || "",
+            image: edge.node?.image?.large || "",
+            voiceActors: (edge.voiceActors || []).map(va => ({
+                id: va.id,
+                name: va.name?.userPreferred || "",
+                image: va.image?.large || ""
+            }))
+        }));
+
         res.json({
             success: true,
             data: {
@@ -554,6 +582,7 @@ app.get('/anime/:id', async (req, res) => {
                 synonyms: media.synonyms || [],
                 tags: (media.tags || []).slice(0, 10).map(t => ({ name: t.name, rank: t.rank })),
                 relations: relations,
+                characters: characters,
             },
             episodes: (episodesList || []).map(ep => {
                 const epNum = parseFloat(ep.number || ep.episodeNumber);
