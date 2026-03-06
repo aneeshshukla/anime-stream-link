@@ -189,175 +189,170 @@ app.get('/api/episodes/:animeId', async (req, res) => {
 // FIX: Previously fetched each spotlight ID sequentially in a for-loop.
 //      Now uses Promise.all to fetch all spotlight data in parallel.
 app.get('/home', async (req, res) => {
-    const customMapping = {
-        99750: {
-            logo: "https://image.tmdb.org/t/p/original/iOGhQzUidBzOj6pxKp7pBZkw2ta.png",
-            banner: "https://artworks.thetvdb.com/banners/movies/16877/backgrounds/16877.jpg"
-        }
-    };
-    const fixedSpotlightIds = [195322, 166613, 182255, 21, 195515, 172463, 99750];
+    try {
+        const customMapping = {
+            99750: {
+                logo: "https://image.tmdb.org/t/p/original/iOGhQzUidBzOj6pxKp7pBZkw2ta.png",
+                banner: "https://artworks.thetvdb.com/banners/movies/16877/backgrounds/16877.jpg"
+            }
+        };
+        const fixedSpotlightIds = [195322, 166613, 182255, 21, 195515, 172463, 99750];
 
-    const query = `
-        query ($id: Int) {
-            Media(id: $id, type: ANIME) {
+        const spotlightQuery = `
+            query ($id: Int) {
+                Media(id: $id, type: ANIME) {
+                    id
+                    title {
+                        english
+                        romaji
+                    }
+                    bannerImage
+                    coverImage {
+                        extraLarge
+                    }
+                    description
+                    season
+                    seasonYear
+                    episodes
+                    status
+                    format
+                    nextAiringEpisode {
+                        timeUntilAiring
+                        episode
+                    }
+                }
+            }
+        `;
+
+        const homeDataQuery = `
+            query ($season: MediaSeason, $seasonYear: Int) {
+                trending: Page(page: 1, perPage: 10) {
+                    media(type: ANIME, sort: TRENDING_DESC) { ...mediaFields }
+                }
+                popular: Page(page: 1, perPage: 10) {
+                    media(type: ANIME, sort: POPULARITY_DESC) { ...mediaFields }
+                }
+                movies: Page(page: 1, perPage: 10) {
+                    media(type: ANIME, format: MOVIE, sort: POPULARITY_DESC) { ...mediaFields }
+                }
+                seasonal: Page(page: 1, perPage: 10) {
+                    media(type: ANIME, season: $season, seasonYear: $seasonYear, sort: POPULARITY_DESC) { ...mediaFields }
+                }
+                allTime: Page(page: 1, perPage: 10) {
+                    media(type: ANIME, sort: SCORE_DESC) { ...mediaFields }
+                }
+                comingSoon: Page(page: 1, perPage: 10) {
+                    media(type: ANIME, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) { ...mediaFields }
+                }
+            }
+            fragment mediaFields on Media {
                 id
                 title {
                     english
                     romaji
                 }
-                bannerImage
                 coverImage {
                     extraLarge
                 }
-                description
-                season
-                seasonYear
+                format
                 episodes
                 status
-                format
-                nextAiringEpisode {
-                    timeUntilAiring
-                    episode
-                }
             }
+        `;
+
+        function getSeason() {
+            const month = new Date().getMonth();
+            if (month >= 0 && month <= 2) return 'WINTER';
+            if (month >= 3 && month <= 5) return 'SPRING';
+            if (month >= 6 && month <= 8) return 'SUMMER';
+            return 'FALL';
         }
-    `;
 
-    // Fetch all spotlight entries in parallel
-    const spotlightResults = await Promise.allSettled(
-        fixedSpotlightIds.map(async (anilistId) => {
-            const [anilistRes, aniZipRes] = await Promise.all([
-                fetchData('https://graphql.anilist.co', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({ query, variables: { id: anilistId } }),
-                }).then(r => r.json()),
+        const currentSeason = getSeason();
+        const currentYear = new Date().getFullYear();
 
-                fetchData(`https://api.ani.zip/mappings?anilist_id=${anilistId}`)
-                    .then(r => r.json())
-                    .catch(() => null),
-            ]);
+        // Fetch all spotlight entries in parallel
+        const spotlightPromise = Promise.allSettled(
+            fixedSpotlightIds.map(async (anilistId) => {
+                const [anilistRes, aniZipRes] = await Promise.all([
+                    fetchData('https://graphql.anilist.co', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                        body: JSON.stringify({ query: spotlightQuery, variables: { id: anilistId } }),
+                    }).then(r => r.json()),
 
-            const media = anilistRes?.data?.Media;
-            if (!media) return null;
+                    fetchData(`https://api.ani.zip/mappings?anilist_id=${anilistId}`)
+                        .then(r => r.json())
+                        .catch(() => null),
+                ]);
 
-            const { banner, logo } = extractAniZipImages(aniZipRes, customMapping[anilistId]);
-            const { timeLeft, episodeCount } = formatAiringInfo(media);
+                const media = anilistRes?.data?.Media;
+                if (!media) return null;
 
-            return {
-                id: media.id,
-                title: media.title.english || media.title.romaji || "",
-                logo: logo || media.coverImage?.extraLarge || "",
-                banner: banner || media.bannerImage || media.coverImage?.extraLarge || "",
-                description: media.description?.replace(/<[^>]*>?/gm, "") || "",
-                season: (media.season && media.seasonYear)
-                    ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}`
-                    : "Unknown",
-                episode: episodeCount,
-                timeLeft: timeLeft,
-                status: formatStatus(media.status),
-                type: media.format || "TV"
-            };
-        })
-    );
+                const { banner, logo } = extractAniZipImages(aniZipRes, customMapping[anilistId]);
+                const { timeLeft, episodeCount } = formatAiringInfo(media);
 
-    // Collect only fulfilled, non-null results
-    const responseData = spotlightResults
-        .filter(r => r.status === 'fulfilled' && r.value !== null)
-        .map(r => r.value);
+                return {
+                    id: media.id,
+                    title: media.title.english || media.title.romaji || "",
+                    logo: logo || media.coverImage?.extraLarge || "",
+                    banner: banner || media.bannerImage || media.coverImage?.extraLarge || "",
+                    description: media.description?.replace(/<[^>]*>?/gm, "") || "",
+                    season: (media.season && media.seasonYear)
+                        ? `${media.season.charAt(0) + media.season.slice(1).toLowerCase()} ${media.seasonYear}`
+                        : "Unknown",
+                    episode: episodeCount,
+                    timeLeft: timeLeft,
+                    status: formatStatus(media.status),
+                    type: media.format || "TV"
+                };
+            })
+        );
 
-    res.json({
-        "spotlight": responseData,
-        "recently added": [
-            {   
-                id: 183984,
-                title: "The Case Book of Arne",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183984-uq5scAXrhEdx.jpg",
-                type: "TV",
-                episodes: 12,
-                status: "Releasing"
-            },
-            {
-                id: 183661,
-                title: "Isekai Office Worker",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183661-3muPFi4LtHmK.jpg",
-                type: "TV",
-                episodes: 12,
-                status: "Releasing"
-            },
-            {
-                id: 177679,
-                title: "The Darwin Incident",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx177679-BgsgE0fQk3qN.jpg",
-                type: "TV",
-                episodes: 13,
-                status: "Releasing"
-            },
-            {
-                id: 187942,
-                title: "Tune In to the Midnight Heart",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx187942-c2cZvunJGfiE.jpg",
-                type: "TV",
-                episodes: 12,
-                status: "Releasing"
-            },
-            {
-                id: 194318,
-                title: "Yoroi-Shinden Samurai Johnny",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx194318-V3STmm4wutVQ.jpg",
-                type: "TV",
-                episodes: 12,
-                status: "Releasing"
-            },
-            {
-                id: 176370,
-                title: "'Tis Time for \"Torture,\" Princess Season 2",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx176370-hz2H4TUeyGgt.png",
-                type: "TV",
-                episodes: 12,
-                status: "Releasing"
-            },
-            {
-                id: 185646,
-                title: "Koupen-chan",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx185646-2eGmsnaSHiLC.jpg",
-                type: "TV Short",
-                episodes: 47,
-                status: "Releasing"
-            },
-            {
-                id: 189565,
-                title: "You Can't Be in a Real Harem",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx189565-OHhadYSsd0Bg.jpg",
-                type: "TV",
-                episodes: 12,
-                status: "Releasing"
-            },
-            {
-                id: 195515,
-                title: "There Was a Cute Girl in the Hero's Party",
-                poster: "https://serveproxy.com/?url=https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx195515-p1nD71Hmr4ly.jpg",
-                type: "TV",
-                episodes: 12,
-                status: "Releasing"
-            }
-        ],
-    //     "popular-anime": [
-    //         { id: "3", title: "Very Popular Anime", type: "TV", episodes: 100 }
-    //     ],
-    //     "popular-movies": [
-    //         { id: "4", title: "Popular Anime Movie", type: "Movie", episodes: 1 }
-    //     ],
-    //     "seasonal anime": [
-    //         { id: "5", title: "This Season's Hit", type: "TV", episodes: 12 }
-    //     ],
-    //     "anime of all time": [
-    //         { id: "6", title: "Legendary Anime", type: "TV", episodes: 500 }
-    //     ],
-    //     "coming soon": [
-    //         { id: "7", title: "Next Year's Hype", type: "TV", episodes: null }
-    //     ]
-    });
+        // Fetch remaining home data in a single GraphQL query
+        const homeDataPromise = fetchData('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ 
+                query: homeDataQuery, 
+                variables: { season: currentSeason, seasonYear: currentYear } 
+            }),
+        }).then(r => r.json());
+
+        const [spotlightResults, homeDataResponse] = await Promise.all([
+            spotlightPromise,
+            homeDataPromise
+        ]);
+
+        // Collect only fulfilled, non-null results
+        const spotlightData = spotlightResults
+            .filter(r => r.status === 'fulfilled' && r.value !== null)
+            .map(r => r.value);
+
+        const lists = homeDataResponse?.data || {};
+
+        const formatMediaList = (mediaList) => (mediaList || []).map(media => ({
+            id: media.id,
+            title: media.title.english || media.title.romaji || "",
+            poster: media.coverImage?.extraLarge || "",
+            type: media.format || "TV",
+            episodes: media.episodes,
+            status: formatStatus(media.status)
+        }));
+
+        res.json({
+            "spotlight": spotlightData,
+            "recently added": formatMediaList(lists.trending?.media),
+            "popular-anime": formatMediaList(lists.popular?.media),
+            "popular-movies": formatMediaList(lists.movies?.media),
+            "seasonal anime": formatMediaList(lists.seasonal?.media),
+            "anime of all time": formatMediaList(lists.allTime?.media),
+            "coming soon": formatMediaList(lists.comingSoon?.media)
+        });
+    } catch (err) {
+        console.error(`[/home] Error:`, err);
+        res.status(500).json({ success: false, error: 'Failed to fetch home data' });
+    }
 });
 
 // ─── Anime detail endpoint ───
